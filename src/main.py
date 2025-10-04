@@ -5,6 +5,8 @@ import os
 import httpx
 from dotenv import load_dotenv
 import logging
+import time
+from datadog_integration import dd_logger, track_api_call, track_ad_generation
 import asyncio
 
 # Load environment variables
@@ -44,6 +46,8 @@ class GenerateCopyRequest(BaseModel):
     product_description: str
     competitor_insights: dict = None
     target_audience: str = "general"
+    price_range: str = None
+    ad_style: str = None
 
 class GenerateCopyResponse(BaseModel):
     success: bool
@@ -85,11 +89,19 @@ async def root():
     return {"message": "Social Media Ad Generator API is running!"}
 
 @app.post("/scrape-data", response_model=ScrapeResponse)
+@track_api_call("scrape-data")
 async def scrape_competitor_data(request: ScrapeRequest):
     """Scrape competitor data using Linkup"""
     try:
         # TODO: Implement Linkup API integration
         logger.info(f"Scraping data for: {request.competitor_url}")
+        
+        # Log to Datadog
+        dd_logger.log_event(
+            title="Competitor Data Scraping",
+            text=f"Scraping competitor data from {request.competitor_url}",
+            tags=[f"competitor_url:{request.competitor_url}", f"product:{request.product_description[:50]}"]
+        )
         
         # Placeholder response
         mock_data = {
@@ -99,6 +111,9 @@ async def scrape_competitor_data(request: ScrapeRequest):
             "target_audience": "environmentally conscious consumers"
         }
         
+        # Track successful scraping
+        dd_logger.increment_counter("scraping.success", tags=[f"competitor:{request.competitor_url}"])
+        
         return ScrapeResponse(
             success=True,
             data=mock_data,
@@ -106,6 +121,12 @@ async def scrape_competitor_data(request: ScrapeRequest):
         )
     except Exception as e:
         logger.error(f"Error scraping data: {str(e)}")
+        dd_logger.log_event(
+            title="Scraping Error",
+            text=f"Failed to scrape data from {request.competitor_url}: {str(e)}",
+            tags=[f"competitor_url:{request.competitor_url}", f"error:{type(e).__name__}"],
+            alert_type="error"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/structure-data", response_model=ScrapeResponse)
@@ -140,27 +161,66 @@ async def structure_scraped_data(request: ScrapeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate-copy", response_model=GenerateCopyResponse)
+@track_api_call("generate-copy")
 async def generate_ad_copy(request: GenerateCopyRequest):
     """Generate ad copy using OpenAI"""
     try:
         # TODO: Implement OpenAI API integration
         logger.info(f"Generating ad copy for: {request.product_description}")
         
-        # Placeholder response
+        # Extract product type for tracking
+        product_type = request.product_description.split()[0] if request.product_description else "unknown"
+        
+        # Log to Datadog
+        dd_logger.log_event(
+            title="Ad Copy Generation",
+            text=f"Generating ad copy for {request.product_description[:50]}...",
+            tags=[
+                f"product_type:{product_type}",
+                f"target_audience:{request.target_audience}",
+                f"ad_style:{request.ad_style or 'default'}"
+            ]
+        )
+        
+        # Enhanced placeholder response using chatbot data
+        product_name = request.product_description.title()
+        target_audience = request.target_audience.title()
+        price_info = f"Starting at {request.price_range}" if request.price_range else "Affordable pricing"
+        style_tone = request.ad_style.title() if request.ad_style else "Modern"
+        
+        # Build competitor insights section
+        competitor_section = ""
+        if request.competitor_insights:
+            insights = request.competitor_insights.get("insights", {})
+            if insights:
+                competitor_section = f"""
+                📊 Market Insights:
+                • Top performing ads focus on: {', '.join(insights.get('key_benefits', ['quality', 'value']))}
+                • Common CTA: {insights.get('common_cta', 'Shop Now')}
+                • Price range: {insights.get('price_range', 'Competitive')}
+                """
+        
         ad_copy = f"""
-        🌱 {request.product_description.title()}
+        🚀 {product_name}
         
-        Transform your daily routine with our premium eco-friendly solution! 
-        Perfect for environmentally conscious consumers who value quality and sustainability.
+        Perfect for {target_audience}! 
+        {price_info} - {style_tone} style that delivers results.
         
-        ✨ Key Benefits:
-        • 100% Eco-friendly materials
-        • Premium quality construction
-        • Affordable pricing
-        
-        🛒 Shop Now and make a difference!
-        #EcoFriendly #SustainableLiving #QualityProducts
+        ✨ Why Choose Us:
+        • Premium quality that lasts
+        • {style_tone} design that stands out
+        • {price_info}
+        {competitor_section}
+        🛒 Get yours today and see the difference!
+        #{product_name.replace(' ', '')} #{target_audience.replace(' ', '')} #{style_tone}
         """
+        
+        # Track successful ad generation
+        dd_logger.increment_counter("ad.generation.success", tags=[
+            f"product_type:{product_type}",
+            f"target_audience:{request.target_audience}",
+            f"ad_style:{request.ad_style or 'default'}"
+        ])
         
         return GenerateCopyResponse(
             success=True,
@@ -169,6 +229,12 @@ async def generate_ad_copy(request: GenerateCopyRequest):
         )
     except Exception as e:
         logger.error(f"Error generating copy: {str(e)}")
+        dd_logger.log_event(
+            title="Ad Generation Error",
+            text=f"Failed to generate ad copy: {str(e)}",
+            tags=[f"product:{request.product_description[:50]}", f"error:{type(e).__name__}"],
+            alert_type="error"
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate-media", response_model=GenerateMediaResponse)
