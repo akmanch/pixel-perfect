@@ -565,14 +565,57 @@ async def generate_image_video(request: GenerateMediaRequest):
 
 @app.post("/translate", response_model=TranslateResponse)
 async def translate_content(request: TranslateRequest):
-    """Translate content using DeepL"""
+    """Translate content using OpenAI"""
     try:
-        # TODO: Implement DeepL API integration
         logger.info(f"Translating text to {request.target_language}")
-        
-        # Placeholder response
-        translated_text = f"[{request.target_language.upper()}] {request.text}"
-        
+
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+
+        if not openai_api_key:
+            # Fallback to placeholder if no API key
+            logger.warning("OpenAI API key not found, using placeholder translation")
+            translated_text = f"[{request.target_language.upper()}] {request.text}"
+        else:
+            # Use OpenAI for translation
+            language_map = {
+                "es": "Spanish",
+                "fr": "French",
+                "de": "German",
+                "it": "Italian",
+                "pt": "Portuguese",
+                "zh": "Chinese",
+                "ja": "Japanese",
+                "ko": "Korean"
+            }
+
+            target_language_name = language_map.get(request.target_language, request.target_language)
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {openai_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "gpt-3.5-turbo",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": f"You are a professional translator. Translate the given text to {target_language_name}. Preserve all formatting, emojis, and hashtags. Only return the translated text, nothing else."
+                            },
+                            {
+                                "role": "user",
+                                "content": request.text
+                            }
+                        ],
+                        "temperature": 0.3
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+                translated_text = result["choices"][0]["message"]["content"].strip()
+
         return TranslateResponse(
             success=True,
             translated_text=translated_text,

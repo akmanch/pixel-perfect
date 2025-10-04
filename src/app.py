@@ -98,9 +98,9 @@ def make_api_request(endpoint: str, data: Dict[Any, Any]) -> Dict[Any, Any]:
 def validate_product_description(text: str) -> tuple[bool, str]:
     """Validate if product description is clear and specific"""
     text = text.strip().lower()
-    
+
     # Check if too short or vague
-    if len(text) < 10:
+    if len(text) < 3:
         return False, "Please provide more details about your product or service."
     
     # Check for vague terms that need clarification
@@ -168,10 +168,23 @@ def main():
         )
         
         # Translation Language
-        translation_language = st.selectbox(
+        language_options = {
+            "Spanish (ES)": "es",
+            "French (FR)": "fr",
+            "German (DE)": "de",
+            "Italian (IT)": "it",
+            "Portuguese (PT)": "pt",
+            "Chinese (ZH)": "zh",
+            "Japanese (JA)": "ja",
+            "Korean (KO)": "ko"
+        }
+
+        selected_language = st.selectbox(
             "🌍 Translation Language",
-            ["es", "fr", "de", "it", "pt"]
+            list(language_options.keys())
         )
+
+        translation_language = language_options[selected_language]
 
     # Main Content Area
     col1, col2 = st.columns([1, 1])
