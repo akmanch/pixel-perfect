@@ -232,6 +232,35 @@ if submitted:
                     # Display Results
                     st.header("📊 Linkup Analysis Results")
                     
+                    # Generate Image Automatically in parallel
+                    image_url = None
+                    with st.spinner("🎨 Generating ad image with Freepik AI..."):
+                        try:
+                            image_response = requests.post(
+                                f"{API_BASE_URL}/generate-media",
+                                json={
+                                    "product_description": f"{product} - {short_description}",
+                                    "media_type": "image",
+                                    "style": visual_direction.lower()
+                                },
+                                timeout=120
+                            )
+                            
+                            if image_response.status_code == 200:
+                                image_data = image_response.json()
+                                if image_data.get("success"):
+                                    image_url = image_data.get("media_url")
+                                    st.success("✅ Image Generated!")
+                        except Exception as e:
+                            st.warning(f"⚠️ Image generation failed: {str(e)}")
+                    
+                    # Show image first if generated
+                    if image_url:
+                        st.subheader("🎨 Generated Ad Image")
+                        st.image(image_url, caption=f"{product} - AI Generated Ad", use_column_width=True)
+                        st.markdown(f"[🔗 View Full Resolution]({image_url})")
+                        st.markdown("---")
+                    
                     # Show input summary
                     with st.expander("📝 Campaign Summary", expanded=True):
                         st.markdown(f"""
