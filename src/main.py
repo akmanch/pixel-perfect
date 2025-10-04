@@ -6,7 +6,11 @@ import httpx
 from dotenv import load_dotenv
 import logging
 import time
-from datadog_integration import dd_logger, track_api_call, track_ad_generation
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from src.datadog_integration import dd_logger, track_api_call, track_ad_generation
+from Web_scraping.llinkupscraper import LinkupScraper
+from Web_scraping.schema import TeammateOutput
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +34,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize Linkup Scraper
+try:
+    linkup_scraper = LinkupScraper()
+    logger.info("✅ Linkup Scraper initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Linkup Scraper: {e}")
+    linkup_scraper = None
 
 # Pydantic models for request/response
 class ScrapeRequest(BaseModel):
@@ -92,38 +104,63 @@ async def root():
 async def scrape_competitor_data(request: ScrapeRequest):
     """Scrape competitor data using Linkup"""
     try:
-        # TODO: Implement Linkup API integration
-        logger.info(f"Scraping data for: {request.competitor_url}")
+        if not linkup_scraper:
+            raise HTTPException(status_code=500, detail="Linkup Scraper not initialized")
+        
+        logger.info(f"Scraping data for: {request.product_description}")
         
         # Log to Datadog
         dd_logger.log_event(
             title="Competitor Data Scraping",
-            text=f"Scraping competitor data from {request.competitor_url}",
-            tags=[f"competitor_url:{request.competitor_url}", f"product:{request.product_description[:50]}"]
+            text=f"Scraping competitor data for {request.product_description}",
+            tags=[f"product:{request.product_description[:50]}"]
         )
         
-        # Placeholder response
-        mock_data = {
-            "competitor": request.competitor_url,
-            "ads_found": 5,
-            "common_themes": ["eco-friendly", "premium quality", "affordable"],
-            "target_audience": "environmentally conscious consumers"
+        # Parse competitor from URL or use description
+        competitor_name = request.competitor_url.split('/')[-1].replace('-', ' ').title() if request.competitor_url else None
+        
+        # Create TeammateOutput for Linkup scraper
+        teammate_data = TeammateOutput(
+            product=request.product_description,
+            short_description=request.product_description,
+            target_audience="general audience",
+            objective="competitive analysis",
+            primary_platforms=["Instagram", "Facebook"],
+            budget="Medium",
+            brand_voice="Professional",
+            key_messages=["Quality", "Innovation"],
+            visual_direction="Modern",
+            constraints="None",
+            success_metrics=["Engagement"],
+            competitors=[competitor_name] if competitor_name else None
+        )
+        
+        # Scrape using Linkup
+        scraped_data = linkup_scraper.scrape_for_ad(teammate_data)
+        
+        # Format response
+        response_data = {
+            "data_quality": scraped_data.data_quality,
+            "competitor_analysis": scraped_data.competitor_analysis,
+            "market_gaps": scraped_data.market_gaps,
+            "pricing_comparison": scraped_data.pricing_comparison,
+            "how_to_beat_them": scraped_data.how_to_beat_them
         }
         
         # Track successful scraping
-        dd_logger.increment_counter("scraping.success", tags=[f"competitor:{request.competitor_url}"])
+        dd_logger.increment_counter("scraping.success", tags=[f"product:{request.product_description[:50]}"])
         
         return ScrapeResponse(
             success=True,
-            data=mock_data,
+            data=response_data,
             message="Competitor data scraped successfully"
         )
     except Exception as e:
         logger.error(f"Error scraping data: {str(e)}")
         dd_logger.log_event(
             title="Scraping Error",
-            text=f"Failed to scrape data from {request.competitor_url}: {str(e)}",
-            tags=[f"competitor_url:{request.competitor_url}", f"error:{type(e).__name__}"],
+            text=f"Failed to scrape data: {str(e)}",
+            tags=[f"product:{request.product_description[:50]}", f"error:{type(e).__name__}"],
             alert_type="error"
         )
         raise HTTPException(status_code=500, detail=str(e))

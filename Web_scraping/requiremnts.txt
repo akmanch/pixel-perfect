@@ -1,0 +1,11 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic>=2.8.0
+
+# AI & Web Scraping
+linkup-sdk==0.6.0
+openai==1.3.0
+
+# Utilities
+python-dotenv==1.0.0
