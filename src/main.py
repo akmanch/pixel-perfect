@@ -6,7 +6,7 @@ import httpx
 from dotenv import load_dotenv
 import logging
 import time
-from datadog_integration import dd_logger, track_api_call, track_ad_generation
+from src.datadog_integration import dd_logger, track_api_call, track_ad_generation
 import asyncio
 
 # Load environment variables
