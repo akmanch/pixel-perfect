@@ -98,7 +98,7 @@ def validate_product_description(text: str) -> tuple[bool, str]:
     text = text.strip().lower()
     
     # Check if too short or vague
-    if len(text) < 10:
+    if len(text) < 3:
         return False, "Please provide more details about your product or service."
     
     # Check for vague terms that need clarification

@@ -6,7 +6,8 @@ import httpx
 from dotenv import load_dotenv
 import logging
 import time
-from datadog_integration import dd_logger, track_api_call, track_ad_generation
+import asyncio
+from src.datadog_integration import dd_logger, track_api_call, track_ad_generation
 
 # Load environment variables
 load_dotenv()
@@ -238,19 +239,83 @@ async def generate_ad_copy(request: GenerateCopyRequest):
 
 @app.post("/generate-media", response_model=GenerateMediaResponse)
 async def generate_image_video(request: GenerateMediaRequest):
-    """Generate images/videos using Imagepik"""
+    """Generate images/videos using Freepik API"""
     try:
-        # TODO: Implement Imagepik API integration
+        freepik_api_key = os.getenv("FREEPIK_API_KEY")
+        if not freepik_api_key:
+            raise HTTPException(status_code=500, detail="FREEPIK_API_KEY not configured")
+
         logger.info(f"Generating {request.media_type} for: {request.product_description}")
-        
-        # Placeholder response
-        media_url = f"https://via.placeholder.com/800x600/4CAF50/FFFFFF?text={request.product_description.replace(' ', '+')}"
-        
-        return GenerateMediaResponse(
-            success=True,
-            media_url=media_url,
-            message=f"{request.media_type.title()} generated successfully"
-        )
+
+        headers = {
+            "x-freepik-api-key": freepik_api_key,
+            "Content-Type": "application/json"
+        }
+
+        # Prepare the request payload for Freepik Imagen3
+        payload = {
+            "prompt": request.product_description,
+            "styling": {
+                "color": "vibrant",
+                "framing": "close-up",
+                "lightning": "studio"
+            },
+            "num_images": 1
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Submit the image generation task
+            response = await client.post(
+                "https://api.freepik.com/v1/ai/text-to-image/imagen3",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract task_id
+            task_id = data.get("task_id") or data.get("id")
+            if not task_id:
+                raise ValueError(f"No task_id found in response: {data}")
+
+            logger.info(f"Freepik task created: {task_id}")
+
+            # Poll for results
+            max_attempts = 30
+            poll_interval = 2
+
+            for attempt in range(max_attempts):
+                await asyncio.sleep(poll_interval)
+
+                poll_response = await client.get(
+                    f"https://api.freepik.com/v1/ai/text-to-image/imagen3/{task_id}",
+                    headers=headers
+                )
+                poll_response.raise_for_status()
+                result = poll_response.json()
+
+                status = result.get("status")
+                logger.info(f"Poll attempt {attempt + 1}: status={status}")
+
+                if status == "completed":
+                    generated = result.get("generated", [])
+                    if generated:
+                        # Handle both string and dict responses
+                        media_url = generated[0] if isinstance(generated[0], str) else generated[0].get("url")
+                        if media_url:
+                            return GenerateMediaResponse(
+                                success=True,
+                                media_url=media_url,
+                                message=f"{request.media_type.title()} generated successfully"
+                            )
+                    raise ValueError(f"No generated images in completed response: {result}")
+
+                elif status in ["failed", "error"]:
+                    error_msg = result.get("error", "Unknown error")
+                    raise ValueError(f"Freepik task failed: {error_msg}")
+
+            raise TimeoutError(f"Image generation timed out after {max_attempts * poll_interval} seconds")
+
     except Exception as e:
         logger.error(f"Error generating media: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
