@@ -46,14 +46,14 @@ A rapid prototype that demonstrates AI-powered social media ad generation using 
 ### **Developer 3: AI & Content Generation (45 minutes)**
 **Responsibilities:**
 - Integrate OpenAI Prompting for ad copy generation
-- Integrate Imagepik for image/video generation
+- Integrate Freepik API for image/video generation
 - Integrate DeepL for content translation
 - Create prompt templates
 - Handle API responses and error handling
 
 **Key Deliverables:**
 - OpenAI Prompting service integration
-- Imagepik API integration
+- Freepik API integration (text-to-image & image-to-video)
 - DeepL translation service
 - Prompt templates and response processing
 
@@ -76,7 +76,7 @@ A rapid prototype that demonstrates AI-powered social media ad generation using 
 ### **Tech Stack (3-Hour Sprint):**
 - **Backend:** Python with FastAPI
 - **Frontend:** Streamlit
-- **APIs:** OpenAI Prompting, Linkup scraping, Structify, Imagepik, DeepL, Twitter API
+- **APIs:** OpenAI Prompting, Linkup scraping, Structify, Freepik (text-to-image & video), DeepL, Twitter API
 - **No Database:** In-memory storage for demo
 - **Deployment:** Local development server
 
@@ -134,7 +134,7 @@ async def post_to_twitter():
 - ✅ Scrape competitor data using Linkup scraping
 - ✅ Structure scraped data with Structify
 - ✅ Generate ad copy using OpenAI Prompting
-- ✅ Generate images/videos using Imagepik
+- ✅ Generate images/videos using Freepik API (Imagen3 & Seedance Pro)
 - ✅ Translate content using DeepL
 - ✅ Display preview of generated content
 - ✅ Post to Twitter/X successfully
@@ -162,7 +162,7 @@ async def post_to_twitter():
 ### **Backup Plans:**
 - If Linkup scraping fails → Use predefined competitor data
 - If Structify fails → Use basic JSON parsing
-- If Imagepik API fails → Use placeholder images
+- If Freepik API fails → Use placeholder images/videos
 - If DeepL API fails → Skip translation feature
 - If Twitter API fails → Show "Copy to clipboard" functionality
 - If OpenAI API fails → Use predefined ad templates
@@ -195,7 +195,7 @@ touch .env
 OPENAI_API_KEY=your_openai_key
 LINKUP_API_KEY=your_linkup_key
 STRUCTIFY_API_KEY=your_structify_key
-IMAGEPIK_API_KEY=your_imagepik_key
+FREEPIK_API_KEY=your_freepik_key  # Get your key at https://www.freepik.com/api
 DEEPL_API_KEY=your_deepl_key
 TWITTER_API_KEY=your_twitter_key
 TWITTER_API_SECRET=your_twitter_secret
@@ -245,13 +245,41 @@ pixel-perfect/
 - "One-click social media posting"
 - "Extensible API framework for future platforms"
 
+## 🎨 Freepik API Integration
+
+### **Quick Ad Generator Script**
+Generate ads directly from the command line:
+
+```bash
+# Generate an image ad
+python generate_ad.py "iPhone 15 Pro with titanium design"
+
+# Generate a video ad
+python generate_ad.py "Eco-friendly water bottle" --type video
+
+# Generate with custom aspect ratio
+python generate_ad.py "Luxury sports car" --aspect square
+```
+
+### **API Features Implemented**
+- **Text-to-Image (Imagen3):** Generate high-quality product images
+- **Image-to-Video (Seedance Pro 1080p):** Convert images to engaging videos
+- **Multiple aspect ratios:** Widescreen (16:9), Square (1:1), Story (9:16), Traditional (3:4)
+- **Styling options:** Photo-realistic, vibrant colors, studio lighting
+- **Async task handling:** Automatic polling for task completion
+
+### **Freepik API Endpoints Used**
+- `POST /v1/ai/text-to-image/imagen3` - Generate images from text
+- `POST /v1/ai/image-to-video/seedance-pro-1080p` - Create videos from images
+- `GET /v1/ai/tasks/{task_id}` - Check generation status
+
 ## 🔮 Post-Sprint Enhancements
 
 - [ ] Add more social platforms (Instagram, LinkedIn)
 - [ ] Implement user accounts and campaign management
 - [ ] Add A/B testing for ad variations
 - [ ] Include analytics and performance tracking
-- [ ] Add video ad generation capabilities
+- [x] Add video ad generation capabilities (✅ Freepik integration complete)
 - [ ] Implement scheduling and automation
 
 ---

@@ -5,6 +5,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 import logging
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -172,19 +173,289 @@ async def generate_ad_copy(request: GenerateCopyRequest):
 
 @app.post("/generate-media", response_model=GenerateMediaResponse)
 async def generate_image_video(request: GenerateMediaRequest):
-    """Generate images/videos using Imagepik"""
+    """Generate images/videos using Freepik API"""
     try:
-        # TODO: Implement Imagepik API integration
         logger.info(f"Generating {request.media_type} for: {request.product_description}")
-        
-        # Placeholder response
-        media_url = f"https://via.placeholder.com/800x600/4CAF50/FFFFFF?text={request.product_description.replace(' ', '+')}"
-        
-        return GenerateMediaResponse(
-            success=True,
-            media_url=media_url,
-            message=f"{request.media_type.title()} generated successfully"
-        )
+
+        freepik_api_key = os.getenv("FREEPIK_API_KEY")
+        if not freepik_api_key:
+            logger.error("FREEPIK_API_KEY not found in environment variables")
+            raise HTTPException(status_code=500, detail="Freepik API key not configured")
+
+        headers = {
+            "x-freepik-api-key": freepik_api_key,
+            "Content-Type": "application/json"
+        }
+
+        if request.media_type == "image":
+            # Text-to-Image using Imagen3
+            url = "https://api.freepik.com/v1/ai/text-to-image/imagen3"
+
+            # Map style to aspect ratio
+            aspect_ratio_map = {
+                "modern": "widescreen_16_9",
+                "square": "square_1_1",
+                "story": "social_story_9_16",
+                "traditional": "traditional_3_4"
+            }
+
+            payload = {
+                "prompt": request.product_description,
+                "num_images": 1,
+                "aspect_ratio": aspect_ratio_map.get(request.style, "widescreen_16_9"),
+                "styling": {
+                    "style": "photo",
+                    "effects": {
+                        "color": "vibrant",
+                        "lightning": "studio",
+                        "framing": "close-up"
+                    }
+                },
+                "person_generation": "allow_all",
+                "safety_settings": "block_none"
+            }
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+
+                result = response.json()
+                logger.info(f"Image API response: {result}")
+
+                # Check if task is completed or get task ID
+                if result.get("data"):
+                    data = result["data"]
+
+                    # Check if images are already available (immediate completion)
+                    if isinstance(data, list) and len(data) > 0 and data[0].get("url"):
+                        media_url = data[0]["url"]
+                    elif data.get("url"):
+                        media_url = data["url"]
+                    elif data.get("images") and len(data["images"]) > 0:
+                        media_url = data["images"][0]["url"]
+                    else:
+                        # Task is still processing, get task ID
+                        task_id = data.get("task_id") or data.get("id") or result.get("id")
+
+                        if not task_id:
+                            logger.error(f"No task ID found in response: {result}")
+                            raise HTTPException(status_code=500, detail="Failed to get task ID from Freepik API")
+
+                        logger.info(f"Image generation task created: {task_id}")
+
+                        # Poll for completion
+                        max_attempts = 20
+                        for attempt in range(max_attempts):
+                            await asyncio.sleep(5)
+
+                            # Use the correct endpoint for checking task status
+                            status_url = f"https://api.freepik.com/v1/ai/text-to-image/imagen3/{task_id}"
+                            status_response = await client.get(status_url, headers=headers)
+
+                            # Handle 404 - task might still be initializing
+                            if status_response.status_code == 404:
+                                logger.info(f"Task not ready yet (404), retrying... (attempt {attempt + 1})")
+                                continue
+
+                            status_response.raise_for_status()
+                            status_result = status_response.json()
+
+                            logger.info(f"Task status (attempt {attempt + 1}): {status_result}")
+
+                            if status_result.get("data"):
+                                task_data = status_result["data"]
+                                status = task_data.get("status")
+
+                                if status == "COMPLETED":
+                                    # Try different response structures
+                                    if task_data.get("generated") and len(task_data["generated"]) > 0:
+                                        # Handle both array of URLs and array of objects
+                                        generated = task_data["generated"][0]
+                                        if isinstance(generated, str):
+                                            media_url = generated
+                                        elif isinstance(generated, dict):
+                                            media_url = generated.get("url")
+                                        break
+                                    elif task_data.get("images") and len(task_data["images"]) > 0:
+                                        media_url = task_data["images"][0]["url"]
+                                        break
+                                    elif isinstance(task_data.get("result"), list) and len(task_data["result"]) > 0:
+                                        media_url = task_data["result"][0]["url"]
+                                        break
+                                    elif task_data.get("url"):
+                                        media_url = task_data["url"]
+                                        break
+                                    else:
+                                        logger.error(f"Completed but no URL found in: {task_data}")
+                                        raise HTTPException(status_code=500, detail="Image URL not found in completed task")
+                                elif status == "FAILED":
+                                    raise HTTPException(status_code=500, detail="Image generation failed")
+                        else:
+                            raise HTTPException(status_code=500, detail="Image generation timeout")
+                else:
+                    raise HTTPException(status_code=500, detail="Invalid response from Freepik API")
+
+            return GenerateMediaResponse(
+                success=True,
+                media_url=media_url,
+                message="Image generated successfully"
+            )
+
+        elif request.media_type == "video":
+            # For video, we first need to generate an image, then convert to video
+            # Step 1: Generate image first
+            image_url = "https://api.freepik.com/v1/ai/text-to-image/imagen3"
+
+            image_payload = {
+                "prompt": request.product_description,
+                "num_images": 1,
+                "aspect_ratio": "widescreen_16_9",
+                "styling": {
+                    "style": "photo",
+                    "effects": {
+                        "color": "vibrant",
+                        "lightning": "studio",
+                        "framing": "close-up"
+                    }
+                }
+            }
+
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                # Generate base image
+                image_response = await client.post(image_url, json=image_payload, headers=headers)
+                image_response.raise_for_status()
+                image_result = image_response.json()
+
+                logger.info(f"Video base image API response: {image_result}")
+
+                # Get image URL (wait for completion if needed)
+                data = image_result.get("data")
+                if data:
+                    # Check if images are already available
+                    if isinstance(data, list) and len(data) > 0 and data[0].get("url"):
+                        base_image_url = data[0]["url"]
+                    elif data.get("url"):
+                        base_image_url = data["url"]
+                    elif data.get("generated") and len(data["generated"]) > 0:
+                        generated = data["generated"][0]
+                        base_image_url = generated if isinstance(generated, str) else generated.get("url")
+                    else:
+                        # Get task ID and poll
+                        task_id = data.get("task_id") or data.get("id")
+
+                        if not task_id:
+                            logger.error(f"No task ID found for video base image: {image_result}")
+                            raise HTTPException(status_code=500, detail="Failed to get task ID for base image")
+
+                        logger.info(f"Video base image task created: {task_id}")
+
+                        # Wait for image generation
+                        for attempt in range(15):
+                            await asyncio.sleep(5)
+                            status_url = f"https://api.freepik.com/v1/ai/text-to-image/imagen3/{task_id}"
+                            status_response = await client.get(status_url, headers=headers)
+
+                            if status_response.status_code == 404:
+                                logger.info(f"Base image task not ready yet (404), retrying...")
+                                continue
+
+                            status_response.raise_for_status()
+                            status_result = status_response.json()
+
+                            logger.info(f"Base image task status (attempt {attempt + 1}): {status_result}")
+
+                            if status_result.get("data"):
+                                task_data = status_result["data"]
+                                if task_data.get("status") == "COMPLETED":
+                                    if task_data.get("generated") and len(task_data["generated"]) > 0:
+                                        generated = task_data["generated"][0]
+                                        base_image_url = generated if isinstance(generated, str) else generated.get("url")
+                                        break
+                        else:
+                            raise HTTPException(status_code=500, detail="Base image generation timeout")
+                else:
+                    raise HTTPException(status_code=500, detail="Invalid response for base image generation")
+
+                # Step 2: Convert image to video
+                logger.info(f"Generating video from base image: {base_image_url}")
+                video_url = "https://api.freepik.com/v1/ai/image-to-video/seedance-pro-1080p"
+                video_payload = {
+                    "image": base_image_url,
+                    "prompt": request.product_description,
+                    "duration": "5",
+                    "aspect_ratio": "widescreen_16_9",
+                    "frames_per_second": 24
+                }
+
+                video_response = await client.post(video_url, json=video_payload, headers=headers)
+                video_response.raise_for_status()
+                video_result = video_response.json()
+
+                logger.info(f"Video generation API response: {video_result}")
+
+                # Wait for video generation
+                video_data = video_result.get("data")
+                if not video_data:
+                    raise HTTPException(status_code=500, detail="Invalid video generation response")
+
+                video_task_id = video_data.get("task_id") or video_data.get("id")
+
+                if not video_task_id:
+                    logger.error(f"No video task ID found: {video_result}")
+                    raise HTTPException(status_code=500, detail="Failed to get video task ID")
+
+                logger.info(f"Video generation task created: {video_task_id}")
+
+                for attempt in range(30):  # Videos take longer - up to 150 seconds
+                    await asyncio.sleep(5)
+
+                    status_url = f"https://api.freepik.com/v1/ai/image-to-video/seedance-pro-1080p/{video_task_id}"
+                    status_response = await client.get(status_url, headers=headers)
+
+                    if status_response.status_code == 404:
+                        logger.info(f"Video task not ready yet (404), retrying... (attempt {attempt + 1}/30)")
+                        continue
+
+                    status_response.raise_for_status()
+                    status_result = status_response.json()
+
+                    logger.info(f"Video task status (attempt {attempt + 1}): {status_result}")
+
+                    if status_result.get("data"):
+                        task_data = status_result["data"]
+                        status = task_data.get("status")
+
+                        if status == "COMPLETED":
+                            # Try different response structures for video
+                            if task_data.get("generated") and len(task_data["generated"]) > 0:
+                                generated = task_data["generated"][0]
+                                media_url = generated if isinstance(generated, str) else generated.get("url")
+                                break
+                            elif task_data.get("video") and task_data["video"].get("url"):
+                                media_url = task_data["video"]["url"]
+                                break
+                            elif task_data.get("url"):
+                                media_url = task_data["url"]
+                                break
+                            else:
+                                logger.error(f"Video completed but no URL found: {task_data}")
+                                raise HTTPException(status_code=500, detail="Video URL not found in completed task")
+                        elif status == "FAILED":
+                            raise HTTPException(status_code=500, detail="Video generation failed")
+                else:
+                    raise HTTPException(status_code=500, detail="Video generation timeout (150 seconds)")
+
+            return GenerateMediaResponse(
+                success=True,
+                media_url=media_url,
+                message="Video generated successfully"
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid media_type. Must be 'image' or 'video'")
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Freepik API error: {e.response.status_code} - {e.response.text}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"Freepik API error: {e.response.text}")
     except Exception as e:
         logger.error(f"Error generating media: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
