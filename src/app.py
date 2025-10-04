@@ -61,7 +61,9 @@ def make_api_request(endpoint: str, data: Dict[Any, Any]) -> Dict[Any, Any]:
     """Make API request to FastAPI backend"""
     start_time = time.time()
     try:
-        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data, timeout=30)
+        # Increase timeout for media generation (can take 60-120 seconds)
+        timeout = 180 if endpoint == "/generate-media" else 30
+        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data, timeout=timeout)
         response.raise_for_status()
         
         # Track API call success
@@ -471,7 +473,11 @@ def main():
             # Media Preview
             if hasattr(st.session_state, 'media_url') and st.session_state.media_url:
                 st.subheader("🎨 Generated Media")
-                st.image(st.session_state.media_url, caption="Generated Media", use_column_width=True)
+                # Check if it's a video or image based on URL or media type
+                if hasattr(st.session_state, 'media_type') and st.session_state.media_type == 'video':
+                    st.video(st.session_state.media_url)
+                else:
+                    st.image(st.session_state.media_url, caption="Generated Media", use_column_width=True)
             
             # Competitor Insights
             if hasattr(st.session_state, 'competitor_insights') and st.session_state.competitor_insights:

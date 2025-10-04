@@ -73,3 +73,7 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Generated files
+generated_ad.json
+output.json
